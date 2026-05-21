@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>HIDS — Attendance Management System</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦷</text></svg>"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f0f4f8;--card:#fff;--sidebar:#0f3460;
+  --accent:#e94560;--accent2:#1a7a5e;
+  --text:#1e293b;--muted:#64748b;--subtle:#94a3b8;
+  --border:#e2e8f0;--success:#16a34a;--warning:#d97706;
+  --danger:#dc2626;--info:#2563eb;
+  --sidebar-w:230px;--header-h:54px;
+}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
+
+/* LOADER */
+#loader{position:fixed;inset:0;background:rgba(15,52,96,.9);z-index:9000;align-items:center;justify-content:center;flex-direction:column;gap:14px;display:flex}
+.spin{width:44px;height:44px;border:4px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+#loader-msg{color:#fff;font-size:14px;font-weight:600}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* LOGIN */
+#login-screen{display:none;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#0f3460,#16213e 50%,#0f3460);padding:16px;position:relative;overflow:hidden}
+#login-screen::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 30% 50%,rgba(233,69,96,.15),transparent 60%),radial-gradient(circle at 70% 50%,rgba(26,122,94,.12),transparent 60%)}
+.login-wrap{width:100%;max-width:420px;position:relative;z-index:1}
+.login-card{background:#fff;border-radius:16px;padding:28px;box-shadow:0 25px 60px rgba(0,0,0,.3)}
+.login-logo{text-align:center;margin-bottom:22px}
+.tooth-icon{width:58px;height:58px;background:linear-gradient(135deg,#0f3460,#1a4a8a);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;box-shadow:0 8px 20px rgba(15,52,96,.3)}
+.tooth-icon i{font-size:26px;color:#fff}
+.login-logo h1{font-size:18px;font-weight:800;color:#0f3460}
+.login-logo p{color:var(--muted);font-size:12px;margin-top:2px}
+.role-tabs{display:flex;border:1.5px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px;background:#f8fafc}
+.role-tab{flex:1;padding:9px;text-align:center;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);transition:all .2s;border-right:1.5px solid var(--border)}
+.role-tab:last-child{border-right:none}
+.role-tab.active{background:#0f3460;color:#fff}
+.fg{margin-bottom:14px}
+.fg label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+.fg input,.fg select{width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;color:var(--text);outline:none;background:#fff;transition:border .2s}
+.fg input:focus,.fg select:focus{border-color:#0f3460;box-shadow:0 0 0 3px rgba(15,52,96,.08)}
+.pw-wrap{position:relative}.pw-wrap input{padding-right:42px}
+.eye-btn{position:absolute;right:11px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--subtle);font-size:17px;padding:2px}
+.login-btn{width:100%;padding:11px;background:var(--accent);border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 4px 14px rgba(233,69,96,.35);margin-top:4px}
+.login-btn:hover{background:#d03350}
+.err-box{background:#fee2e2;color:#991b1b;border:1.5px solid #fca5a5;border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:13px;display:none;align-items:center;gap:8px}
+
+/* APP SHELL */
+#app{display:none;flex-direction:column;min-height:100vh}
+
+/* TOP HEADER */
+#top-header{background:linear-gradient(135deg,#0f3460,#16213e);color:#fff;display:flex;align-items:center;padding:0 16px;height:var(--header-h);position:sticky;top:0;z-index:200;box-shadow:0 2px 10px rgba(0,0,0,.3);flex-shrink:0;gap:12px}
+.hdr-menu-btn{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px;display:none;flex-shrink:0}
+.hdr-logo{font-size:20px;flex-shrink:0}
+.hdr-title h1{font-size:14px;font-weight:800;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr-title p{font-size:10px;color:#94a3b8;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr-right{display:flex;align-items:center;gap:10px;margin-left:auto;flex-shrink:0}
+.acy-badge{background:rgba(233,69,96,.25);border:1px solid rgba(233,69,96,.4);color:#fda4af;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.hdr-inst{font-size:10px;color:#94a3b8;text-align:right;line-height:1.4}
+.hdr-inst strong{color:#fff;display:block;font-size:11px}
+.saving-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* APP BODY */
+.app-body{display:flex;flex:1;position:relative}
+#sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:298}
+#sb-overlay.show{display:block}
+
+/* SIDEBAR */
+#sidebar{width:var(--sidebar-w);background:var(--sidebar);display:flex;flex-direction:column;position:sticky;top:var(--header-h);height:calc(100vh - var(--header-h));overflow-y:auto;flex-shrink:0;transition:transform .25s ease}
+.sb-user{padding:12px 15px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,.1)}
+.av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0}
+.av-admin{background:var(--accent)}.av-faculty{background:var(--accent2)}
+.sb-user-info .sn{color:#fff;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+.rtag{font-size:10px;padding:2px 7px;border-radius:20px;display:inline-block;margin-top:2px;font-weight:600}
+.rt-admin{background:rgba(233,69,96,.25);color:#fda4af}.rt-faculty{background:rgba(26,122,94,.3);color:#6ee7b7}
+.nav{flex:1;padding:6px 0}
+.ni{display:flex;align-items:center;gap:10px;padding:9px 15px;cursor:pointer;border-left:3px solid transparent;color:#cbd5e1;font-size:13px;font-weight:500;transition:all .15s}
+.ni:hover{background:rgba(255,255,255,.07);color:#fff}
+.ni.active{background:rgba(233,69,96,.2);border-left-color:var(--accent);color:#fff}
+.ni i{font-size:16px;flex-shrink:0}
+.ni span{white-space:nowrap}
+.sb-footer{padding:10px 15px;border-top:1px solid rgba(255,255,255,.1)}
+.logout-btn{display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:13px;cursor:pointer;transition:color .15s;padding:4px 0}
+.logout-btn:hover{color:#fff}
+
+/* MAIN */
+.main{flex:1;min-width:0;padding:16px;overflow-x:hidden}
+.pg{display:none}.pg.active{display:block}
+.ph{margin-bottom:18px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ph h1{font-size:19px;font-weight:800;letter-spacing:-.4px}
+.ph p{color:var(--muted);font-size:13px;margin-top:2px}
+.ph-left h1{font-size:19px;font-weight:800;letter-spacing:-.4px}
+.ph-left p{color:var(--muted);font-size:13px;margin-top:2px}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px}
+.sc{background:var(--card);border-radius:12px;padding:13px 14px;border:1px solid var(--border)}
+.sc .lbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.sc .val{font-size:22px;font-weight:800;line-height:1}
+.sc .sub{font-size:10px;color:var(--subtle);margin-top:3px}
+.sc.green .val{color:var(--success)}.sc.red .val{color:var(--danger)}.sc.amber .val{color:var(--warning)}.sc.blue .val{color:var(--info)}
+
+/* CARDS */
+.card{background:var(--card);border-radius:12px;border:1px solid var(--border);overflow:hidden}
+.ch{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.ch h3{font-size:14px;font-weight:700}
+.cb{padding:14px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:13px;cursor:pointer;transition:all .15s;font-weight:600;white-space:nowrap}
+.btn:hover{background:#f8fafc}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn-primary:hover{background:#d03350}
+.btn-success{background:var(--success);border-color:var(--success);color:#fff}.btn-success:hover{background:#15803d}
+.btn-info{background:var(--info);border-color:var(--info);color:#fff}.btn-info:hover{background:#1d4ed8}
+.btn-danger{background:var(--danger);border-color:var(--danger);color:#fff}.btn-danger:hover{background:#b91c1c}
+.btn-warn{background:#f59e0b;border-color:#f59e0b;color:#fff}.btn-warn:hover{background:#d97706}
+.btn-sm{padding:5px 9px;font-size:12px}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap}
+
+/* FORM */
+.ii{padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:#fff;color:var(--text);outline:none;transition:border .2s}
+.ii:focus{border-color:var(--accent)}
+.fl{display:flex;flex-direction:column;gap:4px}
+.fl label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.mg{margin-bottom:13px}
+.mg label{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.mg input,.mg select,.mg textarea{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:#fff;color:var(--text);outline:none;font-family:inherit}
+.mg input:focus,.mg select:focus,.mg textarea:focus{border-color:var(--accent)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+
+/* TABLE */
+table{width:100%;border-collapse:collapse}
+thead th{padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);background:#f8fafc;white-space:nowrap}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:#fafbfc}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.bp{background:#dcfce7;color:#15803d}.ba{background:#fee2e2;color:#dc2626}.bl{background:#fef9c3;color:#854d0e}.bi{background:#dbeafe;color:#1d4ed8}
+.roll-b{background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;padding:2px 7px;border-radius:5px;white-space:nowrap}
+.tag-theory{background:#eff6ff;color:#1d4ed8;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700}
+.tag-practical{background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700}
+.tag-batch-a{background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700}
+.tag-batch-b{background:#fce7f3;color:#9d174d;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700}
+
+/* TOGGLE */
+.toggle{width:40px;height:22px;border-radius:11px;border:none;cursor:pointer;position:relative;transition:.2s;flex-shrink:0}
+.toggle.p{background:var(--success)}.toggle.a{background:var(--danger)}
+.toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.toggle.p::after{right:3px}.toggle.a::after{left:3px}
+.att-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)}
+.att-row:last-child{border-bottom:none}
+.att-ri{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
+
+/* PROGRESS */
+.pb{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;flex-shrink:0}
+.pf{height:100%;border-radius:3px;transition:.3s}
+
+/* BANNERS */
+.banner{padding:10px 13px;border-radius:9px;font-size:13px;display:flex;align-items:flex-start;gap:8px;margin-bottom:12px;font-weight:500;line-height:1.5}
+.banner i{flex-shrink:0;font-size:15px;margin-top:1px}
+.banner-blue{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
+.banner-amber{background:#fffbeb;border:1px solid #fcd34d;color:#92400e}
+.banner-green{background:#f0fdf4;border:1px solid #86efac;color:#15803d}
+.banner-red{background:#fee2e2;border:1px solid #fca5a5;color:#991b1b}
+
+/* PRACTICAL BATCH TABS */
+.prac-tabs{display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px;width:fit-content}
+.prac-tab{padding:7px 18px;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted);border-right:1px solid var(--border);transition:all .2s;background:#fff}
+.prac-tab:last-child{border-right:none}
+.prac-tab.active{background:#0f3460;color:#fff}
+
+/* MODAL */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:flex-end;justify-content:center;padding:0}
+.modal-bg.show{display:flex}
+.modal{background:#fff;border-radius:16px 16px 0 0;padding:20px;width:100%;max-width:600px;max-height:92vh;overflow-y:auto;box-shadow:0 -10px 40px rgba(0,0,0,.2)}
+.modal h3{font-size:16px;font-weight:800;margin-bottom:14px}
+
+/* TOAST */
+.toast-wrap{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9999;pointer-events:none;width:calc(100% - 32px);max-width:360px}
+.toast-item{padding:10px 14px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:7px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);animation:slideUp .22s ease}
+.toast-s{background:#dcfce7;color:#15803d;border:1px solid #86efac}
+.toast-e{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.toast-i{background:#dbeafe;color:#1e40af;border:1px solid #93c5fd}
+@keyframes slideUp{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* SUBJECT / PROMOTE / HOLIDAY */
+.subj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.subj-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;transition:box-shadow .2s}
+.subj-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.07)}
+.avatar-c{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0}
+.promote-card{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1px solid #86efac;border-radius:12px;padding:18px;margin-bottom:14px}
+.promote-card h3{font-size:14px;font-weight:800;color:#15803d;margin-bottom:4px}
+.promote-card p{font-size:13px;color:#166534;margin-bottom:12px}
+.hday-add{background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:14px;border:1px solid var(--border)}
+
+/* EMAIL CONFIG */
+.email-config-section{background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px}
+.email-config-section h4{font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text)}
+.email-status{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:500}
+.email-status.configured{background:#dcfce7;color:#15803d;border:1px solid #86efac}
+.email-status.not-configured{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+
+/* RESPONSIVE */
+@media(max-width:900px){
+  .two-col{grid-template-columns:1fr}
+  .form-row-3{grid-template-columns:1fr 1fr}
+  .hdr-inst{display:none}
+}
+@media(max-width:680px){
+  :root{--sidebar-w:260px}
+  .hdr-menu-btn{display:flex}
+  .acy-badge span{display:none}
+  #sidebar{position:fixed;top:0;left:0;height:100vh;z-index:299;transform:translateX(-100%)}
+  #sidebar.open{transform:translateX(0)}
+  .main{padding:12px}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .form-row{grid-template-columns:1fr}
+  .form-row-3{grid-template-columns:1fr}
+  .subj-grid{grid-template-columns:1fr}
+  .modal{border-radius:16px 16px 0 0;padding:16px}
+  .ph h1{font-size:17px}
+  .btn{padding:6px 10px;font-size:12px}
+  .filters{gap:6px}
+  .ch{padding:10px 12px}
+  .cb{padding:12px}
+  .hide-mobile{display:none}
+  .hide-xs{display:none}
+}
+@media(max-width:400px){
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .sc .val{font-size:20px}
+}
+</style>
+</head>
+<body>
+
+<!-- LOADER -->
+<div id="loader"><div class="spin"></div><div id="loader-msg">Loading…</div></div>
+
+<!-- TOAST -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="tooth-icon"><i class="ti ti-tooth"></i></div>
+        <h1>HIDS — hids.ac.in</h1>
+        <p>Himachal Institute of Dental Sciences · Attendance Portal</p>
+      </div>
+      <div class="role-tabs">
+        <div class="role-tab active" id="rt-admin" onclick="setRole('admin')"><i class="ti ti-shield-check" style="font-size:13px;vertical-align:-1px;margin-right:3px"></i>Super Admin</div>
+        <div class="role-tab" id="rt-faculty" onclick="setRole('faculty')"><i class="ti ti-user-check" style="font-size:13px;vertical-align:-1px;margin-right:3px"></i>Faculty</div>
+      </div>
+      <div id="err-box" class="err-box"><i class="ti ti-alert-circle"></i><span id="err-txt">Invalid credentials.</span></div>
+      <div class="fg"><label>Email</label><input type="email" id="l-email" placeholder="Enter your email" autocomplete="email" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+      <div class="fg"><label>Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="l-pass" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/>
+          <button class="eye-btn" onclick="togglePw()" tabindex="-1"><i class="ti ti-eye" id="eye-i"></i></button>
+        </div>
+      </div>
+      <button class="login-btn" onclick="doLogin()"><i class="ti ti-login" style="font-size:15px;vertical-align:-2px;margin-right:5px"></i>Sign In</button>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <!-- HEADER -->
+  <div id="top-header">
+    <button class="hdr-menu-btn" onclick="toggleSidebar()" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+    <div class="hdr-logo">🦷</div>
+    <div class="hdr-title">
+      <h1>HIDS Attendance System</h1>
+      <p>Himachal Institute of Dental Sciences</p>
+    </div>
+    <div class="hdr-right">
+      <div class="acy-badge"><i class="ti ti-calendar"></i><span id="hdr-acy">—</span></div>
+      <div class="hdr-inst"><strong id="hdr-uname">—</strong><span id="hdr-urole">—</span></div>
+      <span class="saving-dot" title="Connected to Supabase"></span>
+    </div>
+  </div>
+
+  <div class="app-body">
+    <div id="sb-overlay" onclick="closeSidebar()"></div>
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <div class="sb-user">
+        <div class="av av-admin" id="sb-av">—</div>
+        <div class="sb-user-info">
+          <div class="sn" id="sb-name">—</div>
+          <span class="rtag rt-admin" id="sb-rtag">—</span>
+        </div>
+      </div>
+      <nav class="nav" id="sidebar-nav"></nav>
+      <div class="sb-footer">
+        <div class="logout-btn" onclick="doLogout()"><i class="ti ti-logout"></i><span>Sign Out</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <!-- DASHBOARD -->
+      <div class="pg" id="pg-dashboard">
+        <div class="ph"><h1>Dashboard</h1><p id="dash-sub">Loading…</p></div>
+        <div class="stats-grid">
+          <div class="sc blue"><div class="lbl">Students</div><div class="val" id="d-total">—</div><div class="sub">Enrolled</div></div>
+          <div class="sc green"><div class="lbl">Avg Att.</div><div class="val" id="d-avg">—</div><div class="sub">All subjects</div></div>
+          <div class="sc red"><div class="lbl">Below 70%</div><div class="val" id="d-low">—</div><div class="sub">At risk</div></div>
+          <div class="sc amber"><div class="lbl">Sessions</div><div class="val" id="d-sess">—</div><div class="sub">Academic</div></div>
+        </div>
+        <div class="two-col" style="margin-bottom:14px">
+          <div class="card"><div class="ch"><h3>Subject-wise Average</h3></div><div class="cb" id="d-subj"><p style="color:var(--subtle)">Loading…</p></div></div>
+          <div class="card">
+            <div class="ch"><h3><i class="ti ti-alert-triangle" style="color:var(--danger);font-size:14px;vertical-align:-2px;margin-right:4px"></i>At-Risk Students</h3><span class="badge ba" id="d-risk-cnt">0</span></div>
+            <div class="cb" id="d-atrisk"></div>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="card"><div class="ch"><h3>Recent Email Alerts</h3></div><div class="cb" id="d-emaillog"></div></div>
+          <div class="card"><div class="ch"><h3><i class="ti ti-calendar-off" style="color:var(--warning);font-size:14px;vertical-align:-2px;margin-right:4px"></i>Upcoming Holidays</h3></div><div class="cb" id="d-holidays"></div></div>
+        </div>
+      </div>
+
+      <!-- MARK ATTENDANCE -->
+      <div class="pg" id="pg-mark">
+        <div class="ph"><h1>Mark Attendance</h1><p>Select subject and date to record</p></div>
+        <div class="card" style="margin-bottom:12px"><div class="cb">
+          <div id="fac-lock-banner" class="banner banner-amber" style="display:none"><i class="ti ti-lock"></i><span id="fac-lock-txt"></span></div>
+          <div class="filters">
+            <div class="fl"><label>Subject</label><select id="mk-sub" onchange="loadAttForm()" class="ii" style="min-width:180px;max-width:100%"></select></div>
+            <div class="fl"><label>Date</label><input type="date" id="mk-date" onchange="loadAttForm()" class="ii"/></div>
+            <button class="btn" onclick="markAll('present')"><i class="ti ti-checks"></i>All Present</button>
+            <button class="btn" onclick="markAll('absent')"><i class="ti ti-x"></i>All Absent</button>
+          </div>
+          <!-- Practical batch selector (shown only for practical subjects) -->
+          <div id="mk-prac-batch" style="display:none;margin-top:12px;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:12px;font-weight:700;color:var(--muted)">PRACTICAL BATCH:</span>
+            <div class="prac-tabs">
+              <div class="prac-tab active" data-b="A" onclick="switchPracBatch('A')">Batch A (Roll 1–50)</div>
+              <div class="prac-tab" data-b="B" onclick="switchPracBatch('B')">Batch B (Roll 51–100)</div>
+            </div>
+            <input type="hidden" id="mk-prac-batch-val" value="A"/>
+          </div>
+        </div></div>
+        <div class="card" id="att-card" style="display:none">
+          <div class="ch">
+            <div style="min-width:0;flex:1">
+              <h3 id="att-title" style="white-space:normal;font-size:13px;line-height:1.4"></h3>
+              <div id="att-conducted" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0"><span class="badge bp" id="ct-p">0 Present</span><span class="badge ba" id="ct-a">0 Absent</span></div>
+          </div>
+          <div class="cb" id="att-list"></div>
+          <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-danger btn-sm" id="admin-edit-btn" style="display:none" onclick="adminUnlock()"><i class="ti ti-lock-open"></i>Unlock &amp; Edit</button>
+            <button class="btn btn-success" id="save-att-btn" onclick="saveAtt()"><i class="ti ti-device-floppy"></i>Save &amp; Lock</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STUDENTS -->
+      <div class="pg" id="pg-students">
+        <div class="ph"><h1>Students</h1><p id="stu-sub">Manage student records</p></div>
+        <div class="card">
+          <div class="ch">
+            <h3>Student Directory</h3>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <div style="position:relative">
+                <i class="ti ti-search" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--subtle);font-size:14px"></i>
+                <input class="ii" type="text" id="stu-search" placeholder="Search…" oninput="renderStudents()" style="padding-left:30px;width:150px"/>
+              </div>
+              <select class="ii" id="stu-batch" onchange="renderStudents()" style="width:110px">
+                <option value="">All Batches</option>
+                <option>BDS-1</option><option>BDS-2</option><option>BDS-3</option><option>BDS-4</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="add-stu-btn" onclick="showAddStudentModal()" style="display:none"><i class="ti ti-user-plus"></i><span class="hide-xs">Add</span></button>
+              <button class="btn btn-info btn-sm" id="import-stu-btn" onclick="showImportModal()" style="display:none"><i class="ti ti-file-import"></i><span class="hide-xs">Import CSV</span></button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Roll</th><th>Name</th><th>Batch</th>
+                <th class="hide-mobile">Yr</th><th class="hide-mobile">Prac</th>
+                <th class="hide-mobile">Email</th>
+                <th>Att%</th><th>Status</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="stu-tbody"><tr><td colspan="9" style="text-align:center;color:var(--subtle);padding:20px">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- REPORTS -->
+      <div class="pg" id="pg-reports">
+        <div class="ph"><h1>Reports</h1><p>Generate &amp; export attendance reports</p></div>
+        <div class="card" style="margin-bottom:12px"><div class="cb">
+          <div class="filters">
+            <div class="fl"><label>Type</label>
+              <select id="rp-type" onchange="genReport()" class="ii">
+                <option value="overview">Overall Summary</option>
+                <option value="subject">Subject-wise</option>
+                <option value="low">Below Threshold</option>
+                <option value="daily">Day-wise</option>
+              </select>
+            </div>
+            <div class="fl"><label>Batch</label>
+              <select id="rp-batch" onchange="genReport()" class="ii" style="width:110px">
+                <option value="">All</option><option>BDS-1</option><option>BDS-2</option><option>BDS-3</option><option>BDS-4</option>
+              </select>
+            </div>
+            <div class="fl" id="rp-sub-wrap" style="display:none"><label>Subject</label>
+              <select id="rp-sub" onchange="genReport()" class="ii" style="max-width:170px"></select>
+            </div>
+            <div class="fl"><label>Threshold %</label>
+              <input type="number" id="rp-thresh" value="70" min="0" max="100" class="ii" style="width:72px" oninput="genReport()"/>
+            </div>
+            <button class="btn btn-success btn-sm" onclick="exportCSV()"><i class="ti ti-file-spreadsheet"></i>CSV</button>
+            <button class="btn btn-info btn-sm" onclick="bulkEmail()"><i class="ti ti-mail-forward"></i>Alert</button>
+          </div>
+        </div></div>
+        <div class="card">
+          <div class="ch"><h3 id="rp-title">Report</h3><span class="badge bi" id="rp-cnt"></span></div>
+          <div class="tbl-wrap"><table><thead id="rp-thead"></thead><tbody id="rp-tbody"></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- PAST SESSIONS -->
+      <div class="pg" id="pg-history">
+        <div class="ph"><h1>Past Sessions</h1><p>View previous academic year attendance records</p></div>
+        <div class="card" style="margin-bottom:12px"><div class="cb">
+          <div class="filters">
+            <div class="fl"><label>Session</label><select id="hist-session-sel" onchange="loadHistoryReport()" class="ii" style="min-width:130px"></select></div>
+            <div class="fl"><label>Batch</label>
+              <select id="hist-batch-sel" onchange="loadHistoryReport()" class="ii" style="width:110px">
+                <option value="">All</option><option>BDS-1</option><option>BDS-2</option><option>BDS-3</option><option>BDS-4</option>
+              </select>
+            </div>
+          </div>
+        </div></div>
+        <div class="card">
+          <div class="ch"><h3>Historical Attendance</h3><span class="badge bi" id="hist-count"></span></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Roll</th><th>Name</th><th>Batch</th><th>Overall %</th><th>Status</th></tr></thead>
+              <tbody id="hist-tbody"><tr><td colspan="5" style="text-align:center;color:var(--subtle);padding:20px">Select a session above.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MY SUBJECTS (Faculty) -->
+      <div class="pg" id="pg-mysubjects">
+        <div class="ph"><h1>My Subjects</h1><p id="mysub-p">Loading…</p></div>
+        <div class="banner banner-blue"><i class="ti ti-info-circle"></i>You can only mark today's attendance for your assigned subjects. After saving, attendance is locked — contact admin for corrections.</div>
+        <div class="subj-grid" id="my-sub-grid"></div>
+      </div>
+
+      <!-- SUBJECTS (Admin) -->
+      <div class="pg" id="pg-subjects">
+        <div class="ph">
+          <div class="ph-left"><h1>Subjects</h1><p>Manage subjects, types &amp; assign faculty</p></div>
+          <button class="btn btn-primary" onclick="showAddSubjectModal()"><i class="ti ti-plus"></i>Add Subject</button>
+        </div>
+        <div id="admin-subj-grid"></div>
+      </div>
+
+      <!-- HOLIDAYS -->
+      <div class="pg" id="pg-holidays">
+        <div class="ph"><h1>Holidays</h1><p>Holidays are excluded from attendance % calculation</p></div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="ch"><h3><i class="ti ti-plus" style="color:var(--success);font-size:14px;vertical-align:-2px;margin-right:4px"></i>Add Holiday</h3></div>
+          <div class="cb">
+            <div class="hday-add">
+              <div class="form-row">
+                <div class="mg"><label>Date *</label><input type="date" id="h-date" class="ii" style="width:100%"/></div>
+                <div class="mg"><label>Holiday Name *</label><input type="text" id="h-name" class="ii" style="width:100%" placeholder="e.g. Diwali, Republic Day"/></div>
+              </div>
+              <div class="form-row">
+                <div class="mg"><label>Type</label>
+                  <select id="h-type" class="ii" style="width:100%">
+                    <option value="national">National Holiday</option>
+                    <option value="state">State Holiday</option>
+                    <option value="college">College Holiday</option>
+                    <option value="exam">Exam / Event</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div class="mg" style="align-self:flex-end">
+                  <button class="btn btn-success" onclick="addHoliday()" style="width:100%"><i class="ti ti-plus"></i>Add Holiday</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3>All Holidays</h3><span class="badge bi" id="holiday-cnt">0</span></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Holiday Name</th><th>Type</th><th>Action</th></tr></thead>
+              <tbody id="holiday-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- YEAR & PROMOTION -->
+      <div class="pg" id="pg-promote">
+        <div class="ph"><h1>Year &amp; Promotion</h1><p>Manage academic sessions and promote students</p></div>
+        <div class="promote-card">
+          <h3><i class="ti ti-calendar-event" style="margin-right:5px"></i>New Academic Session</h3>
+          <p>Current: <strong id="cur-acy-label">—</strong>. Starting a new session archives attendance (viewable in Past Sessions).</p>
+          <div class="filters">
+            <div class="fl"><label style="color:#15803d">New Academic Year</label>
+              <input type="text" id="new-acy" class="ii" placeholder="e.g. 2025-26" style="width:130px"/>
+            </div>
+            <button class="btn btn-success" onclick="startNewSession()"><i class="ti ti-refresh"></i>Start New Session</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="ch"><h3><i class="ti ti-arrow-up-circle" style="color:var(--success);font-size:14px;vertical-align:-2px;margin-right:4px"></i>Selective Promotion</h3></div>
+          <div class="cb">
+            <div class="banner banner-amber"><i class="ti ti-alert-triangle"></i>Select individual students to promote. Unselected students stay in their current batch.</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px" id="promote-grid"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3><i class="ti ti-archive" style="font-size:14px;vertical-align:-2px;margin-right:4px"></i>Alumni / Graduated</h3><span class="badge bp" id="alumni-cnt">0</span></div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Roll</th><th>Name</th><th>Batch</th><th>Session</th><th>Graduated On</th></tr></thead>
+            <tbody id="alumni-tbody"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- EMAIL ALERTS -->
+      <div class="pg" id="pg-email">
+        <div class="ph"><h1>Email Alerts</h1><p>Configure SMTP and send attendance alerts to parents</p></div>
+
+        <!-- EMAIL CONFIGURATION -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="ch">
+            <h3><i class="ti ti-settings" style="color:var(--info);font-size:14px;vertical-align:-2px;margin-right:5px"></i>Email Configuration (SMTP)</h3>
+            <span class="badge bi" id="smtp-status-badge">Not Configured</span>
+          </div>
+          <div class="cb">
+            <div class="banner banner-blue"><i class="ti ti-info-circle"></i>
+              Configure your SMTP server to send real emails to parents. We recommend <strong>Gmail</strong>, <strong>Outlook</strong>, or your college's mail server.
+              For Gmail: use App Password (not your regular password) from Google Account → Security → App Passwords.
+            </div>
+            <div id="smtp-status-bar" class="email-status not-configured" style="margin-bottom:14px">
+              <i class="ti ti-alert-circle"></i>Email not configured — alerts are logged only, not sent.
+            </div>
+            <div class="form-row">
+              <div class="mg"><label>SMTP Host *</label><input type="text" id="smtp-host" placeholder="smtp.gmail.com" class="ii" style="width:100%"/></div>
+              <div class="mg"><label>SMTP Port *</label><input type="number" id="smtp-port" placeholder="587" value="587" class="ii" style="width:100%"/></div>
+            </div>
+            <div class="form-row">
+              <div class="mg"><label>Sender Email *</label><input type="email" id="smtp-user" placeholder="attendance@hids.ac.in" class="ii" style="width:100%"/></div>
+              <div class="mg"><label>Sender Name</label><input type="text" id="smtp-from-name" placeholder="HIDS Attendance System" class="ii" style="width:100%"/></div>
+            </div>
+            <div class="mg"><label>App Password / SMTP Password *</label>
+              <div class="pw-wrap">
+                <input type="password" id="smtp-pass" placeholder="App password or SMTP password" class="ii" style="width:100%"/>
+                <button class="eye-btn" onclick="toggleSmtpPw()" tabindex="-1"><i class="ti ti-eye" id="smtp-eye"></i></button>
+              </div>
+            </div>
+            <div class="mg"><label>Encryption</label>
+              <select id="smtp-enc" class="ii" style="width:200px">
+                <option value="tls">TLS (Port 587) — Recommended</option>
+                <option value="ssl">SSL (Port 465)</option>
+                <option value="none">None (Port 25)</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-success" onclick="saveSmtpConfig()"><i class="ti ti-device-floppy"></i>Save SMTP Config</button>
+              <button class="btn btn-info" onclick="testSmtpEmail()"><i class="ti ti-mail-check"></i>Send Test Email</button>
+              <button class="btn btn-danger btn-sm" onclick="clearSmtpConfig()"><i class="ti ti-trash"></i>Clear Config</button>
+            </div>
+            <div style="margin-top:14px;padding:10px 12px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)">
+              <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">QUICK SETUP GUIDES</div>
+              <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <button class="btn btn-sm" onclick="fillGmailPreset()"><i class="ti ti-brand-google"></i>Gmail Preset</button>
+                <button class="btn btn-sm" onclick="fillOutlookPreset()"><i class="ti ti-brand-windows"></i>Outlook Preset</button>
+                <button class="btn btn-sm" onclick="fillYahooPreset()"><i class="ti ti-brand-yahoo"></i>Yahoo Preset</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <!-- COMPOSE -->
+          <div class="card"><div class="ch"><h3>Compose Alert</h3></div><div class="cb">
+            <div class="mg"><label>Send To</label>
+              <select id="em-to"><option value="70">Parents of students below 70%</option><option value="75">Below 75%</option><option value="all">All parents</option></select>
+            </div>
+            <div class="mg"><label>Subject Line</label><input type="text" id="em-subj" value="Attendance Alert — Action Required"/></div>
+            <div class="mg"><label>Message Body</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Variables: {name} {roll} {batch} {pct}</div>
+              <textarea id="em-body" rows="8" style="resize:vertical;line-height:1.6">Dear Parent / Guardian,
+
+This is to inform you that your ward {name} (Roll No: {roll}, {batch}) currently has {pct}% attendance, which is below the required minimum of 75%.
+
+Kindly advise your ward to attend all classes regularly to avoid academic consequences.
+
+For queries, please contact the college office during working hours.
+
+Regards,
+Academic Office
+Himachal Institute of Dental Sciences
+hids.ac.in</textarea>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-primary" onclick="sendEmails()"><i class="ti ti-send"></i>Send Now</button>
+              <button class="btn" onclick="previewEmail()"><i class="ti ti-eye"></i>Preview</button>
+            </div>
+          </div></div>
+
+          <!-- STATS + LOG -->
+          <div>
+            <div class="card" style="margin-bottom:12px"><div class="ch"><h3>Statistics</h3></div><div class="cb">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div style="background:#f8fafc;border-radius:9px;padding:12px;text-align:center">
+                  <div style="font-size:20px;font-weight:800;color:var(--danger)" id="em-stat-low">—</div>
+                  <div style="font-size:11px;color:var(--muted);margin-top:2px">Below 70%</div>
+                </div>
+                <div style="background:#f8fafc;border-radius:9px;padding:12px;text-align:center">
+                  <div style="font-size:20px;font-weight:800;color:var(--info)" id="em-stat-sent">0</div>
+                  <div style="font-size:11px;color:var(--muted);margin-top:2px">Emails Sent</div>
+                </div>
+              </div>
+            </div></div>
+            <div class="card">
+              <div class="ch"><h3>Email Log</h3></div>
+              <div class="cb" id="email-log" style="max-height:300px;overflow-y:auto"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="pg" id="pg-settings">
+        <div class="ph"><h1>Settings</h1><p>System configuration and faculty management</p></div>
+        <div class="two-col">
+          <div class="card"><div class="ch"><h3>Configuration</h3></div><div class="cb">
+            <div class="mg"><label>Academic Year</label><input type="text" id="set-acy" class="ii" style="width:150px"/></div>
+            <div class="mg"><label>College Name</label><input type="text" id="set-college" class="ii" style="width:100%"/></div>
+            <div class="mg"><label>Minimum Attendance %</label><input type="number" id="set-min" value="75" class="ii" style="width:100px"/></div>
+            <div class="mg"><label>Alert Threshold %</label><input type="number" id="set-thresh" value="70" class="ii" style="width:100px"/></div>
+            <button class="btn btn-primary" onclick="saveSettings()"><i class="ti ti-device-floppy"></i>Save Settings</button>
+          </div></div>
+          <div class="card">
+            <div class="ch">
+              <h3>Faculty Management</h3>
+              <button class="btn btn-sm btn-primary" onclick="showAddFacultyModal()"><i class="ti ti-plus"></i>Add</button>
+            </div>
+            <div class="cb" id="faculty-list"><p style="color:var(--subtle)">Loading…</p></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeModal()">
+  <div class="modal"><div id="modal-inner"></div></div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+<script>
+// SMTP config helpers — stored in localStorage on device
+function toggleSmtpPw(){
+  const i=document.getElementById('smtp-pass'),ic=document.getElementById('smtp-eye')
+  i.type=i.type==='password'?'text':'password'
+  ic.className=i.type==='password'?'ti ti-eye':'ti ti-eye-off'
+}
+function fillGmailPreset(){
+  document.getElementById('smtp-host').value='smtp.gmail.com'
+  document.getElementById('smtp-port').value='587'
+  document.getElementById('smtp-enc').value='tls'
+  if(window.toast) window.toast('Gmail preset loaded. Enter your Gmail address and App Password.','i')
+}
+function fillOutlookPreset(){
+  document.getElementById('smtp-host').value='smtp-mail.outlook.com'
+  document.getElementById('smtp-port').value='587'
+  document.getElementById('smtp-enc').value='tls'
+  if(window.toast) window.toast('Outlook preset loaded. Enter your Outlook email and password.','i')
+}
+function fillYahooPreset(){
+  document.getElementById('smtp-host').value='smtp.mail.yahoo.com'
+  document.getElementById('smtp-port').value='587'
+  document.getElementById('smtp-enc').value='tls'
+  if(window.toast) window.toast('Yahoo preset loaded. Enter your Yahoo email and App Password.','i')
+}
+
+function saveSmtpConfig(){
+  const cfg={
+    host:document.getElementById('smtp-host').value.trim(),
+    port:document.getElementById('smtp-port').value.trim(),
+    user:document.getElementById('smtp-user').value.trim(),
+    pass:document.getElementById('smtp-pass').value.trim(),
+    fromName:document.getElementById('smtp-from-name').value.trim(),
+    enc:document.getElementById('smtp-enc').value
+  }
+  if(!cfg.host||!cfg.user||!cfg.pass){
+    if(window.toast) window.toast('Host, email and password are required.','e'); return
+  }
+  localStorage.setItem('hids_smtp_config', JSON.stringify(cfg))
+  updateSmtpStatusUI(true)
+  if(window.toast) window.toast('SMTP config saved! Send a test email to verify.','s')
+}
+
+function clearSmtpConfig(){
+  if(!confirm('Remove SMTP configuration?')) return
+  localStorage.removeItem('hids_smtp_config')
+  document.getElementById('smtp-host').value=''
+  document.getElementById('smtp-port').value='587'
+  document.getElementById('smtp-user').value=''
+  document.getElementById('smtp-pass').value=''
+  document.getElementById('smtp-from-name').value=''
+  updateSmtpStatusUI(false)
+  if(window.toast) window.toast('SMTP config cleared.','i')
+}
+
+function loadSmtpConfig(){
+  const raw=localStorage.getItem('hids_smtp_config')
+  if(!raw) return null
+  try{return JSON.parse(raw)}catch{return null}
+}
+
+function updateSmtpStatusUI(configured){
+  const badge=document.getElementById('smtp-status-badge')
+  const bar=document.getElementById('smtp-status-bar')
+  if(!badge||!bar) return
+  if(configured){
+    badge.textContent='✓ Configured'
+    badge.className='badge bp'
+    bar.className='email-status configured'
+    bar.innerHTML='<i class="ti ti-circle-check"></i>Email configured — alerts will be sent to parents.'
+  } else {
+    badge.textContent='Not Configured'
+    badge.className='badge bl'
+    bar.className='email-status not-configured'
+    bar.innerHTML='<i class="ti ti-alert-circle"></i>Email not configured — alerts are logged only, not sent.'
+  }
+}
+
+function loadSmtpUI(){
+  const cfg=loadSmtpConfig()
+  if(cfg){
+    if(document.getElementById('smtp-host')) document.getElementById('smtp-host').value=cfg.host||''
+    if(document.getElementById('smtp-port')) document.getElementById('smtp-port').value=cfg.port||'587'
+    if(document.getElementById('smtp-user')) document.getElementById('smtp-user').value=cfg.user||''
+    if(document.getElementById('smtp-pass')) document.getElementById('smtp-pass').value=cfg.pass||''
+    if(document.getElementById('smtp-from-name')) document.getElementById('smtp-from-name').value=cfg.fromName||''
+    if(document.getElementById('smtp-enc')) document.getElementById('smtp-enc').value=cfg.enc||'tls'
+    updateSmtpStatusUI(true)
+  } else {
+    updateSmtpStatusUI(false)
+  }
+}
+
+async function testSmtpEmail(){
+  const cfg=loadSmtpConfig()
+  if(!cfg){if(window.toast) window.toast('Save SMTP config first.','e');return}
+  // Since we are client-side, we use EmailJS or show instructions
+  // The actual sending is done via Supabase Edge Function
+  openTestEmailModal(cfg)
+}
+
+function openTestEmailModal(cfg){
+  document.getElementById('modal-inner').innerHTML=`
+    <h3><i class="ti ti-mail-check" style="color:var(--success);font-size:15px;vertical-align:-2px;margin-right:6px"></i>Test Email</h3>
+    <div class="banner banner-blue"><i class="ti ti-info-circle"></i>A test email will be sent using your SMTP configuration.</div>
+    <div class="mg"><label>Send Test To</label><input type="email" id="test-email-to" placeholder="your@email.com" class="ii" style="width:100%" value="${cfg.user}"/></div>
+    <div style="background:#f8fafc;border-radius:9px;padding:12px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">SMTP SETTINGS</div>
+      <div style="font-size:12px;color:var(--text)">Host: <strong>${cfg.host}:${cfg.port}</strong></div>
+      <div style="font-size:12px;color:var(--text)">From: <strong>${cfg.fromName||'HIDS AMS'} &lt;${cfg.user}&gt;</strong></div>
+      <div style="font-size:12px;color:var(--text)">Encryption: <strong>${cfg.enc.toUpperCase()}</strong></div>
+    </div>
+    <div class="banner banner-amber"><i class="ti ti-alert-triangle"></i>
+      <div>Real email sending requires a backend (Supabase Edge Function). 
+      <strong>To enable real sending:</strong> Deploy the Edge Function from <code style="background:#f0f0f0;padding:1px 5px;border-radius:3px;font-size:11px">supabase/functions/send-email/index.ts</code> in your Supabase project.
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px">
+      <button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn btn-success" onclick="sendTestViaEdge('${document.getElementById('test-email-to').value||cfg.user}',event)"><i class="ti ti-send"></i>Send Test</button>
+    </div>`
+  document.getElementById('modal-bg').classList.add('show')
+}
+
+async function sendTestViaEdge(to,e){
+  const toEl=document.getElementById('test-email-to')
+  const toAddr=toEl?toEl.value:to
+  if(window.sendEmailViaEdge){
+    await window.sendEmailViaEdge(toAddr,'HIDS AMS — Test Email','This is a test email from HIDS Attendance Management System. Your SMTP configuration is working correctly.')
+  } else {
+    if(window.toast) window.toast('Test logged. Deploy Edge Function to send real emails.','i')
+  }
+  closeModal()
+}
+
+// Expose globally
+window.saveSmtpConfig=saveSmtpConfig
+window.clearSmtpConfig=clearSmtpConfig
+window.testSmtpEmail=testSmtpEmail
+window.loadSmtpUI=loadSmtpUI
+window.loadSmtpConfig=loadSmtpConfig
+window.fillGmailPreset=fillGmailPreset
+window.fillOutlookPreset=fillOutlookPreset
+window.fillYahooPreset=fillYahooPreset
+window.toggleSmtpPw=toggleSmtpPw
+window.openTestEmailModal=openTestEmailModal
+window.sendTestViaEdge=sendTestViaEdge
+window.updateSmtpStatusUI=updateSmtpStatusUI
+
+// Load SMTP UI when email page shows
+document.addEventListener('DOMContentLoaded',()=>{
+  // Auto-load when page transitions to email tab
+  const observer=new MutationObserver(()=>{
+    const emailPage=document.getElementById('pg-email')
+    if(emailPage&&emailPage.classList.contains('active')){
+      loadSmtpUI()
+    }
+  })
+  observer.observe(document.body,{attributes:true,subtree:true,attributeFilter:['class']})
+})
+</script>
+</body>
+</html>
