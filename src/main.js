@@ -181,8 +181,12 @@ async function fetchLocksForSubject(subjectId){
 }
 
 async function fetchClassSchedule(subjectId,sessionId){
-  const{data}=await supabase.from('class_schedule').select('date').eq('subject_id',subjectId).eq('session_id',sessionId)
+  const{data}=await supabase.from('class_schedule').select('date,topic').eq('subject_id',subjectId).eq('session_id',sessionId).order('date',{ascending:false})
   DB.classSchedule[subjectId]=(data||[]).map(r=>r.date)
+  // store topic map: classTopics[subjectId][date] = topic
+  if(!DB.classTopics) DB.classTopics={}
+  DB.classTopics[subjectId]={}
+  ;(data||[]).forEach(r=>{ if(r.topic) DB.classTopics[subjectId][r.date]=r.topic })
 }
 
 // ── ATTENDANCE % — based on actual classes conducted, excluding holidays ──
@@ -279,6 +283,12 @@ function initAppUI(){
   if($('set-college'))    $('set-college').value = DB.settings.college_name||''
   if($('set-min'))        $('set-min').value     = DB.settings.min_attendance||75
   if($('set-thresh'))     $('set-thresh').value  = DB.settings.alert_threshold||70
+  // Populate report subject dropdowns
+  const allSubs=CU.role==='admin'?DB.subjects:DB.subjects.filter(s=>(s.faculty_subjects||[]).some(fs=>fs.faculty_id===CU.id))
+  const sfSel=$('rp-sub-filter')
+  const dSel=$('rp-sub')
+  if(sfSel) sfSel.innerHTML='<option value="">All Subjects</option>'+allSubs.map(s=>`<option value="${s.id}">${safe(s.name)} (${s.batch})</option>`).join('')
+  if(dSel)  dSel.innerHTML=allSubs.map(s=>`<option value="${s.id}">${safe(s.name)} (${s.batch})</option>`).join('')
   showPg(CU.role==='admin'?'dashboard':'mysubjects')
 }
 
@@ -465,6 +475,17 @@ async function loadAttForm(){
   $('att-title').innerHTML=`${safe(sub.name)}${pracTag} — ${fmtDate(date)}${lockedBadge}`
   $('att-conducted').textContent=`Classes conducted: ${(DB.classSchedule[subId]||[]).length} | Students: ${students.length}`
 
+  // Load existing topic for this date
+  const existingTopic=(DB.classTopics?.[subId]?.[date])||''
+  const topicEl=$('att-topic')
+  const topicWrap=$('att-topic-wrap')
+  if(topicEl){
+    topicEl.value=existingTopic
+    topicEl.disabled=readOnly
+    topicEl.style.background=readOnly?'#f8fafc':''
+  }
+  if(topicWrap) topicWrap.style.display='block'
+
   $('att-list').innerHTML=students.length?students.map(s=>{
     const st=attDayMap[s.id]||'present'
     return `<div class="att-row" id="ar-${s.id}">
@@ -562,9 +583,18 @@ async function saveAtt(){
   }))
   const{error}=await supabase.from('attendance').upsert(rows,{onConflict:'student_id,subject_id,date'})
   if(error){hideLoad();toast('Save failed: '+error.message,'e');return}
-  await supabase.from('class_schedule').upsert({subject_id:subId,session_id:DB.curSession?.id,date},{onConflict:'subject_id,date'})
+
+  // Save topic to class_schedule
+  const topicVal=($('att-topic')?.value||'').trim()
+  await supabase.from('class_schedule').upsert(
+    {subject_id:subId,session_id:DB.curSession?.id,date,topic:topicVal||null},
+    {onConflict:'subject_id,date'}
+  )
   if(!DB.classSchedule[subId]) DB.classSchedule[subId]=[]
   if(!DB.classSchedule[subId].includes(date)) DB.classSchedule[subId].push(date)
+  if(!DB.classTopics) DB.classTopics={}
+  if(!DB.classTopics[subId]) DB.classTopics[subId]={}
+  if(topicVal) DB.classTopics[subId][date]=topicVal
   if(CU.role==='faculty'){
     await supabase.from('attendance_locks').upsert({subject_id:subId,session_id:DB.curSession?.id,date,locked_by:CU.id},{onConflict:'subject_id,date'})
     await supabase.from('attendance').update({locked:true}).eq('subject_id',subId).eq('date',date)
@@ -908,41 +938,64 @@ window.confirmImport=confirmImport
 async function genReport(){
   const type=$('rp-type')?.value||'overview'
   const batch=$('rp-batch')?.value||''
+  const year=$('rp-year')?.value||''
   const thresh=parseInt($('rp-thresh')?.value||70)
-  $('rp-sub-wrap').style.display=type==='daily'?'flex':'none'
+  const subFilter=$('rp-sub-filter')?.value||''
+  const dateFrom=$('rp-date-from')?.value||''
+  const dateTo=$('rp-date-to')?.value||''
   const thead=$('rp-thead'), tbody=$('rp-tbody')
-  let students=batch?DB.students.filter(s=>s.batch===batch):DB.students
+
+  // Show/hide relevant filter rows
+  const subWrap=$('rp-sub-wrap')
+  const dateWrap=$('rp-date-wrap')
+  const subFilterWrap=$('rp-sub-filter-wrap')
+  if(subWrap)    subWrap.style.display   = type==='daily'?'flex':'none'
+  if(dateWrap)   dateWrap.style.display  = (type==='daily'||type==='datewise')?'flex':'none'
+  if(subFilterWrap) subFilterWrap.style.display = (type==='subject'||type==='datewise'||type==='daily')?'flex':'none'
+
+  let students=DB.students
   if(CU.role==='faculty'){
     const batches=[...new Set(getMySubjects().map(s=>s.batch))]
     students=students.filter(s=>batches.includes(s.batch))
   }
+  if(batch) students=students.filter(s=>s.batch===batch)
+  if(year)  students=students.filter(s=>String(s.year||'1')===year)
+
+  // ── OVERALL SUMMARY ──────────────────────────────────────
   if(type==='overview'){
-    $('rp-title').textContent='Overall Attendance'
-    thead.innerHTML='<tr><th>Roll</th><th>Name</th><th>Batch</th><th>Prac Batch</th><th>Overall %</th><th>Status</th><th>Action</th></tr>'
-    tbody.innerHTML=students.map(s=>{
+    $('rp-title').textContent='Overall Attendance Summary'
+    thead.innerHTML='<tr><th>Roll</th><th>Name</th><th>Batch</th><th>Year</th><th>Prac Batch</th><th>Overall %</th><th>Status</th><th>Action</th></tr>'
+    const rows=students.map(s=>{
       const oa=getOverall(s.id)
-      return `<tr>
-        <td><span class="roll-b">${safe(s.roll)}</span></td>
-        <td style="font-weight:700">${safe(s.name)}</td>
-        <td>${s.batch}</td>
-        <td>Batch ${s.prac_batch||'A'}</td>
-        <td style="font-weight:800;color:${pctColor(oa)}">${oa}%</td>
-        <td><span class="badge ${pctBadge(oa)}">${oa>=75?'Good':oa>=60?'Warn':'Risk'}</span></td>
-        <td><button class="btn btn-sm" onclick="showStudentModal('${s.id}')"><i class="ti ti-eye"></i></button></td>
-      </tr>`
-    }).join('')
-    $('rp-cnt').textContent=students.length+' students'
+      return {s,oa}
+    }).filter(({s,oa})=>!thresh||oa===0||(thresh&&oa<=100))
+    tbody.innerHTML=rows.map(({s,oa})=>`<tr>
+      <td><span class="roll-b">${safe(s.roll)}</span></td>
+      <td style="font-weight:700">${safe(s.name)}</td>
+      <td>${s.batch}</td>
+      <td>Year ${s.year||1}</td>
+      <td><span class="tag-batch-${(s.prac_batch||'a').toLowerCase()}">Batch ${s.prac_batch||'A'}</span></td>
+      <td style="font-weight:800;color:${pctColor(oa)}">${oa}%</td>
+      <td><span class="badge ${pctBadge(oa)}">${oa>=75?'Good':oa>=60?'Warn':'Risk'}</span></td>
+      <td><button class="btn btn-sm" onclick="showStudentModal('${s.id}')"><i class="ti ti-eye"></i></button></td>
+    </tr>`).join('')
+    $('rp-cnt').textContent=rows.length+' students'
+
+  // ── SUBJECT-WISE ─────────────────────────────────────────
   } else if(type==='subject'){
     $('rp-title').textContent='Subject-wise Attendance'
-    const subs=CU.role==='faculty'?getMySubjects():batch?DB.subjects.filter(s=>s.batch===batch):DB.subjects
-    thead.innerHTML=`<tr><th>Subject</th><th>Type</th><th>Batch</th><th>Faculty</th><th>Classes</th><th>Avg %</th><th>Below ${thresh}%</th></tr>`
+    let subs=CU.role==='faculty'?getMySubjects():(batch?DB.subjects.filter(s=>s.batch===batch):DB.subjects)
+    if(subFilter) subs=subs.filter(s=>s.id===subFilter)
+    thead.innerHTML=`<tr><th>Subject</th><th>Type</th><th>Batch</th><th>Faculty</th><th>Classes</th><th>Avg %</th><th>Below ${thresh}%</th><th>Action</th></tr>`
     tbody.innerHTML=subs.map(sub=>{
-      const sts=DB.students.filter(s=>s.batch===sub.batch)
+      const sts=students.filter(s=>s.batch===sub.batch)
       let tp=0,bl=0
       sts.forEach(s=>{const a=getAttStat(s.id,sub.id);tp+=a.pct;if(a.pct<thresh&&a.t>0) bl++})
       const av=sts.length?Math.round(tp/sts.length):0
       const conducted=(DB.classSchedule[sub.id]||[]).length
-      const typeTag=sub.subject_type==='practical'?'<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;font-weight:700">Practical</span>':'<span style="background:#eff6ff;color:#1d4ed8;font-size:10px;padding:1px 5px;border-radius:3px;font-weight:700">Theory</span>'
+      const typeTag=sub.subject_type==='practical'
+        ?'<span class="tag-practical">Practical</span>'
+        :'<span class="tag-theory">Theory</span>'
       return `<tr>
         <td style="font-weight:700">${safe(sub.name)}</td>
         <td>${typeTag}</td>
@@ -951,20 +1004,32 @@ async function genReport(){
         <td>${conducted}</td>
         <td style="font-weight:800;color:${pctColor(av)}">${av}%</td>
         <td><span class="badge ${bl>0?'ba':'bp'}">${bl}</span></td>
+        <td><button class="btn btn-sm" onclick="showSubjReport('${sub.id}')"><i class="ti ti-eye"></i></button></td>
       </tr>`
     }).join('')
     $('rp-cnt').textContent=subs.length+' subjects'
+
+  // ── BELOW THRESHOLD ──────────────────────────────────────
   } else if(type==='low'){
-    $('rp-title').textContent=`Students Below ${thresh}%`
-    thead.innerHTML=`<tr><th>Roll</th><th>Name</th><th>Batch</th><th>%</th><th>Email</th><th>Action</th></tr>`
+    $('rp-title').textContent=`Students Below ${thresh}% Attendance`
     const low=students.filter(s=>{const oa=getOverall(s.id);return oa<thresh&&oa>0;})
+    thead.innerHTML=`<tr><th>Roll</th><th>Name</th><th>Batch</th><th>Year</th><th>Overall %</th><th>Shortage</th><th>Parent Email</th><th>Action</th></tr>`
     tbody.innerHTML=low.map(s=>{
       const oa=getOverall(s.id)
+      // Calculate classes needed
+      const subs=DB.subjects.filter(sub=>sub.batch===s.batch)
+      let totalConducted=0
+      subs.forEach(sub=>{ totalConducted+=(DB.classSchedule[sub.id]||[]).length })
+      const minRequired=Math.ceil(totalConducted*thresh/100)
+      const actualPresent=Math.round(oa*totalConducted/100)
+      const shortage=Math.max(0,minRequired-actualPresent)
       return `<tr>
         <td><span class="roll-b">${safe(s.roll)}</span></td>
         <td style="font-weight:700">${safe(s.name)}</td>
         <td>${s.batch}</td>
+        <td>Year ${s.year||1}</td>
         <td style="font-weight:800;color:var(--danger)">${oa}%</td>
+        <td><span style="background:#fee2e2;color:#991b1b;font-size:11px;padding:2px 7px;border-radius:4px;font-weight:700">${shortage} classes short</span></td>
         <td style="font-size:12px;color:var(--muted)">${safe(s.email||'—')}</td>
         <td><div style="display:flex;gap:4px">
           <button class="btn btn-sm" onclick="showStudentModal('${s.id}')"><i class="ti ti-eye"></i></button>
@@ -973,19 +1038,93 @@ async function genReport(){
       </tr>`
     }).join('')
     $('rp-cnt').textContent=low.length+' students'
+
+  // ── DATE-WISE (with topic) ───────────────────────────────
+  } else if(type==='datewise'){
+    $('rp-title').textContent='Date-wise Class Report'
+    let subs=CU.role==='faculty'?getMySubjects():(batch?DB.subjects.filter(s=>s.batch===batch):DB.subjects)
+    if(subFilter) subs=subs.filter(s=>s.id===subFilter)
+    showLoad('Loading date-wise data…')
+    // Fetch all class_schedule records with topic for these subjects
+    const subIds=subs.map(s=>s.id)
+    let schedQuery=supabase.from('class_schedule')
+      .select('subject_id,date,topic,subjects(name,code,batch)')
+      .in('subject_id',subIds)
+      .eq('session_id',DB.curSession?.id)
+      .order('date',{ascending:false})
+    if(dateFrom) schedQuery=schedQuery.gte('date',dateFrom)
+    if(dateTo)   schedQuery=schedQuery.lte('date',dateTo)
+    const{data:schedRecs}=await schedQuery
+
+    // Fetch attendance summary per date
+    const attQuery=supabase.from('attendance')
+      .select('subject_id,date,status')
+      .in('subject_id',subIds)
+      .eq('session_id',DB.curSession?.id)
+    const{data:attRecs}=await attQuery
+
+    hideLoad()
+
+    // Build summary: for each class date, count present/absent
+    const summaryMap={}
+    ;(attRecs||[]).forEach(r=>{
+      const k=`${r.subject_id}_${r.date}`
+      if(!summaryMap[k]) summaryMap[k]={p:0,a:0}
+      if(r.status==='present') summaryMap[k].p++; else summaryMap[k].a++
+    })
+
+    thead.innerHTML='<tr><th>Date</th><th>Subject</th><th>Batch</th><th>Topic Covered</th><th>Present</th><th>Absent</th><th>Total</th><th>Att%</th></tr>'
+    const rows=(schedRecs||[])
+    tbody.innerHTML=rows.length?rows.map(r=>{
+      const k=`${r.subject_id}_${r.date}`
+      const sm=summaryMap[k]||{p:0,a:0}
+      const t=sm.p+sm.a
+      const pct=t>0?Math.round(sm.p/t*100):0
+      const isHol=isHoliday(r.date)
+      return `<tr ${isHol?'style="opacity:.5"':''}>
+        <td style="white-space:nowrap">${fmtDate(r.date)}${isHol?'<span class="badge bl" style="margin-left:4px;font-size:9px">Holiday</span>':''}</td>
+        <td style="font-weight:700">${safe(r.subjects?.name||'—')}</td>
+        <td>${safe(r.subjects?.batch||'—')}</td>
+        <td style="color:var(--info);font-size:12px;max-width:200px">${r.topic?`<span style="background:#eff6ff;padding:2px 8px;border-radius:4px;font-size:11px">${safe(r.topic)}</span>`:'<span style="color:var(--subtle)">—</span>'}</td>
+        <td style="color:var(--success);font-weight:700">${sm.p}</td>
+        <td style="color:var(--danger);font-weight:700">${sm.a}</td>
+        <td>${t}</td>
+        <td style="font-weight:800;color:${pctColor(pct)}">${t>0?pct+'%':'—'}</td>
+      </tr>`
+    }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--subtle);padding:20px">No class records found for the selected filters.</td></tr>'
+    $('rp-cnt').textContent=rows.length+' class records'
+
+  // ── DAY-WISE STUDENT GRID ────────────────────────────────
   } else if(type==='daily'){
     const subId=$('rp-sub')?.value
     const sub=DB.subjects.find(s=>s.id===subId)
     $('rp-title').textContent=sub?`Day-wise: ${sub.name}`:'Day-wise'
     if(!sub){thead.innerHTML='';tbody.innerHTML='';return}
     showLoad('Loading…')
-    const{data:dayRecs}=await supabase.from('attendance').select('student_id,date,status').eq('subject_id',subId).eq('session_id',DB.curSession?.id).order('date',{ascending:false})
+    let attQ=supabase.from('attendance').select('student_id,date,status').eq('subject_id',subId).eq('session_id',DB.curSession?.id).order('date',{ascending:false})
+    if(dateFrom) attQ=attQ.gte('date',dateFrom)
+    if(dateTo)   attQ=attQ.lte('date',dateTo)
+    const{data:dayRecs}=await attQ
     hideLoad()
-    const days=[...new Set((dayRecs||[]).map(r=>r.date))].slice(0,20)
-    const sts=DB.students.filter(s=>s.batch===sub.batch)
+    let days=[...new Set((dayRecs||[]).map(r=>r.date))]
     const bySd={}
     ;(dayRecs||[]).forEach(r=>{if(!bySd[r.student_id])bySd[r.student_id]={};bySd[r.student_id][r.date]=r.status})
-    thead.innerHTML=`<tr><th>Roll</th><th>Name</th>${days.map(d=>`<th style="font-size:10px;min-width:55px">${fmtDate(d)}</th>`).join('')}<th>%</th></tr>`
+    // Filter students if prac batch filter
+    let sts=students.filter(s=>s.batch===sub.batch)
+
+    // Topic row
+    const topicMap=DB.classTopics?.[subId]||{}
+
+    thead.innerHTML=`<tr>
+      <th>Roll</th><th>Name</th>
+      ${days.map(d=>{
+        const topic=topicMap[d]
+        return `<th style="font-size:10px;min-width:60px;text-align:center">
+          ${fmtDate(d)}${topic?`<div style="color:var(--info);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60px" title="${safe(topic)}">${safe(topic)}</div>`:''}
+        </th>`
+      }).join('')}
+      <th>%</th>
+    </tr>`
     tbody.innerHTML=sts.map(s=>{
       const cells=days.map(d=>{
         const v=bySd[s.id]?.[d]
@@ -998,6 +1137,30 @@ async function genReport(){
   }
 }
 window.genReport=genReport
+
+// ── Report filter helpers ────────────────────────────────────
+function onReportTypeChange(){
+  const type=$('rp-type')?.value||'overview'
+  // Populate subject dropdowns from all subjects
+  const allSubs=getMySubjects()
+  const sfSel=$('rp-sub-filter')
+  const dSel=$('rp-sub')
+  if(sfSel){
+    sfSel.innerHTML='<option value="">All Subjects</option>'+allSubs.map(s=>`<option value="${s.id}">${safe(s.name)} (${s.batch})</option>`).join('')
+  }
+  if(dSel){
+    dSel.innerHTML=allSubs.map(s=>`<option value="${s.id}">${safe(s.name)} (${s.batch})</option>`).join('')
+  }
+  genReport()
+}
+window.onReportTypeChange=onReportTypeChange
+
+function clearDateFilter(){
+  const df=$('rp-date-from'), dt=$('rp-date-to')
+  if(df) df.value=''; if(dt) dt.value=''
+  genReport()
+}
+window.clearDateFilter=clearDateFilter
 
 // ═══════════════════════════════════════════════════════════
 //  HISTORY
@@ -1636,21 +1799,52 @@ window.saveSettings=saveSettings
 function exportCSV(){
   const type=$('rp-type')?.value||'overview'
   const batch=$('rp-batch')?.value||''
+  const year=$('rp-year')?.value||''
   const thresh=parseInt($('rp-thresh')?.value||70)
+  const subFilter=$('rp-sub-filter')?.value||''
+  const dateFrom=$('rp-date-from')?.value||''
+  const dateTo=$('rp-date-to')?.value||''
   let csv=''
+
+  let students=DB.students
+  if(batch) students=students.filter(s=>s.batch===batch)
+  if(year)  students=students.filter(s=>String(s.year||'1')===year)
+
   if(type==='subject'){
     csv='Subject,Type,Code,Batch,Faculty,Classes Conducted,Avg %,Below Threshold\n'
-    const subs=batch?DB.subjects.filter(s=>s.batch===batch):DB.subjects
+    let subs=batch?DB.subjects.filter(s=>s.batch===batch):DB.subjects
+    if(subFilter) subs=subs.filter(s=>s.id===subFilter)
     subs.forEach(sub=>{
-      const sts=DB.students.filter(s=>s.batch===sub.batch)
+      const sts=students.filter(s=>s.batch===sub.batch)
       let tp=0,bl=0; sts.forEach(s=>{const a=getAttStat(s.id,sub.id);tp+=a.pct;if(a.pct<thresh&&a.t>0) bl++})
       const av=sts.length?Math.round(tp/sts.length):0
       const conducted=(DB.classSchedule[sub.id]||[]).length
       csv+=`"${sub.name}",${sub.subject_type||'theory'},${sub.code},${sub.batch},"${getTeacherNames(sub.id)}",${conducted},${av}%,${bl}\n`
     })
+  } else if(type==='datewise'){
+    csv='Date,Subject,Batch,Topic Covered,Present,Absent,Total,Attendance %\n'
+    // Build from class schedule in memory
+    let subs=batch?DB.subjects.filter(s=>s.batch===batch):DB.subjects
+    if(subFilter) subs=subs.filter(s=>s.id===subFilter)
+    subs.forEach(sub=>{
+      const topicMap=DB.classTopics?.[sub.id]||{}
+      ;(DB.classSchedule[sub.id]||[]).sort().reverse().forEach(date=>{
+        if(dateFrom&&date<dateFrom) return
+        if(dateTo&&date>dateTo) return
+        const sts=students.filter(s=>s.batch===sub.batch)
+        const records=DB.attByStudentSubject
+        let p=0,a=0
+        sts.forEach(s=>{
+          const recs=DB.attByStudentSubject?.[s.id]?.[sub.id]||[]
+          const rec=recs.find(r=>r.date===date)
+          if(rec){if(rec.status==='present')p++;else a++;}
+        })
+        const t=p+a, pct=t>0?Math.round(p/t*100):0
+        csv+=`${date},"${sub.name}",${sub.batch},"${topicMap[date]||''}",${p},${a},${t},${t>0?pct+'%':'—'}\n`
+      })
+    })
   } else {
     csv='Roll No.,Name,Batch,Year,Prac Batch,Email,Overall %,Status\n'
-    let students=batch?DB.students.filter(s=>s.batch===batch):DB.students
     if(type==='low') students=students.filter(s=>{const oa=getOverall(s.id);return oa<thresh&&oa>0})
     students.forEach(s=>{
       const oa=getOverall(s.id)
