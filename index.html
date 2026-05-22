@@ -365,6 +365,14 @@ tbody tr:hover td{background:#fafbfc}
             <div style="display:flex;gap:6px;flex-shrink:0"><span class="badge bp" id="ct-p">0 Present</span><span class="badge ba" id="ct-a">0 Absent</span></div>
           </div>
           <div class="cb" id="att-list"></div>
+          <!-- TOPIC INPUT -->
+          <div id="att-topic-wrap" style="display:none;padding:10px 14px;border-top:1px solid var(--border);background:#f8fcff">
+            <label style="font-size:11px;font-weight:700;color:var(--info);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px">
+              <i class="ti ti-book-2" style="font-size:13px;vertical-align:-1px;margin-right:4px"></i>Topic Covered in This Class
+            </label>
+            <input type="text" id="att-topic" placeholder="e.g. Oral Anatomy — Chapter 3: Muscles of Mastication" class="ii" style="width:100%;font-size:13px" maxlength="200"/>
+            <div style="font-size:11px;color:var(--subtle);margin-top:4px">This topic will appear in reports and day-wise view</div>
+          </div>
           <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
             <button class="btn btn-danger btn-sm" id="admin-edit-btn" style="display:none" onclick="adminUnlock()"><i class="ti ti-lock-open"></i>Unlock &amp; Edit</button>
             <button class="btn btn-success" id="save-att-btn" onclick="saveAtt()"><i class="ti ti-device-floppy"></i>Save &amp; Lock</button>
@@ -407,15 +415,18 @@ tbody tr:hover td{background:#fafbfc}
 
       <!-- REPORTS -->
       <div class="pg" id="pg-reports">
-        <div class="ph"><h1>Reports</h1><p>Generate &amp; export attendance reports</p></div>
+        <div class="ph"><h1>Reports</h1><p>Generate &amp; export attendance reports with filters</p></div>
         <div class="card" style="margin-bottom:12px"><div class="cb">
-          <div class="filters">
-            <div class="fl"><label>Type</label>
-              <select id="rp-type" onchange="genReport()" class="ii">
+
+          <!-- ROW 1: Report Type + Batch + Year + Threshold -->
+          <div class="filters" style="margin-bottom:10px">
+            <div class="fl"><label>Report Type</label>
+              <select id="rp-type" onchange="onReportTypeChange()" class="ii">
                 <option value="overview">Overall Summary</option>
                 <option value="subject">Subject-wise</option>
                 <option value="low">Below Threshold</option>
-                <option value="daily">Day-wise</option>
+                <option value="datewise">Date-wise (with Topics)</option>
+                <option value="daily">Day-wise Student Grid</option>
               </select>
             </div>
             <div class="fl"><label>Batch</label>
@@ -423,15 +434,41 @@ tbody tr:hover td{background:#fafbfc}
                 <option value="">All</option><option>BDS-1</option><option>BDS-2</option><option>BDS-3</option><option>BDS-4</option>
               </select>
             </div>
-            <div class="fl" id="rp-sub-wrap" style="display:none"><label>Subject</label>
-              <select id="rp-sub" onchange="genReport()" class="ii" style="max-width:170px"></select>
+            <div class="fl"><label>Year</label>
+              <select id="rp-year" onchange="genReport()" class="ii" style="width:90px">
+                <option value="">All</option>
+                <option value="1">Year 1</option><option value="2">Year 2</option>
+                <option value="3">Year 3</option><option value="4">Year 4</option>
+              </select>
             </div>
             <div class="fl"><label>Threshold %</label>
               <input type="number" id="rp-thresh" value="70" min="0" max="100" class="ii" style="width:72px" oninput="genReport()"/>
             </div>
-            <button class="btn btn-success btn-sm" onclick="exportCSV()"><i class="ti ti-file-spreadsheet"></i>CSV</button>
+            <button class="btn btn-success btn-sm" onclick="exportCSV()"><i class="ti ti-file-spreadsheet"></i>Export CSV</button>
             <button class="btn btn-info btn-sm" onclick="bulkEmail()"><i class="ti ti-mail-forward"></i>Alert</button>
           </div>
+
+          <!-- ROW 2: Subject filter + Date range (shown conditionally) -->
+          <div class="filters">
+            <div class="fl" id="rp-sub-filter-wrap" style="display:none"><label>Subject</label>
+              <select id="rp-sub-filter" onchange="genReport()" class="ii" style="min-width:160px">
+                <option value="">All Subjects</option>
+              </select>
+            </div>
+            <div class="fl" id="rp-sub-wrap" style="display:none"><label>Subject (Day-wise)</label>
+              <select id="rp-sub" onchange="genReport()" class="ii" style="min-width:160px"></select>
+            </div>
+            <div id="rp-date-wrap" style="display:none;align-items:flex-end;gap:8px;flex-wrap:wrap">
+              <div class="fl"><label>From Date</label>
+                <input type="date" id="rp-date-from" onchange="genReport()" class="ii"/>
+              </div>
+              <div class="fl"><label>To Date</label>
+                <input type="date" id="rp-date-to" onchange="genReport()" class="ii"/>
+              </div>
+              <button class="btn btn-sm" onclick="clearDateFilter()"><i class="ti ti-x"></i>Clear Dates</button>
+            </div>
+          </div>
+
         </div></div>
         <div class="card">
           <div class="ch"><h3 id="rp-title">Report</h3><span class="badge bi" id="rp-cnt"></span></div>
