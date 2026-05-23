@@ -114,10 +114,29 @@ async function bootstrapApp(){
   showLoad('Loading data…')
   try{
     await Promise.all([fetchSettings(),fetchSessions(),fetchUsers(),fetchSubjects(),fetchStudents(),fetchAlumni(),fetchHolidays()])
+
+    // ── DIAGNOSTIC: Log key data to browser console ──
+    console.log('[HIDS] Logged in as:', CU?.email, '| Role:', CU?.role, '| ID:', CU?.id)
+    console.log('[HIDS] Subjects loaded:', DB.subjects.length)
+    console.log('[HIDS] Users loaded:', DB.users.length)
+    console.log('[HIDS] faculty_subjects sample:', DB.subjects[0]?.faculty_subjects)
+    if(CU?.role==='faculty'){
+      const mySubs=DB.subjects.filter(s=>(s.faculty_subjects||[]).some(fs=>fs.faculty_id===CU.id))
+      console.log('[HIDS] My subjects count:', mySubs.length, mySubs.map(s=>s.name))
+      if(mySubs.length===0){
+        console.error('[HIDS] ⚠️ No subjects found for this faculty.')
+        console.error('[HIDS] CU.id:', CU.id)
+        console.error('[HIDS] All faculty_subjects rows:', DB.subjects.flatMap(s=>s.faculty_subjects||[]))
+      }
+    }
+
     $('login-screen').style.display='none'
     $('app').style.display='flex'; $('app').style.flexDirection='column'
     initAppUI()
-  }catch(e){ console.error(e); toast('Load failed: '+e.message,'e') }
+  }catch(e){
+    console.error('[HIDS] Bootstrap error:', e)
+    toast('Load failed: '+e.message,'e')
+  }
   hideLoad()
 }
 
@@ -263,7 +282,15 @@ function getTeacherNames(subjectId){
 function getMySubjects(){
   if(!CU) return []
   if(CU.role==='admin') return DB.subjects
-  return DB.subjects.filter(s=>(s.faculty_subjects||[]).some(fs=>fs.faculty_id===CU.id))
+  // Match by faculty_id === CU.id (UUID from Supabase auth)
+  const matched=DB.subjects.filter(s=>(s.faculty_subjects||[]).some(fs=>fs.faculty_id===CU.id))
+  // Debug log — check browser console if subjects don't show
+  if(matched.length===0 && DB.subjects.length>0){
+    console.warn('[HIDS] Faculty subject match failed. CU.id=',CU.id)
+    console.warn('[HIDS] Sample faculty_subjects:',DB.subjects[0]?.faculty_subjects)
+    console.warn('[HIDS] Total subjects in DB:',DB.subjects.length)
+  }
+  return matched
 }
 
 // ── PRACTICAL BATCH HELPERS ──────────────────────────────────
@@ -356,7 +383,12 @@ async function renderDash(){
   $('dash-sub').textContent=`${DB.settings.college_name||''} — ${DB.settings.academic_year||''}`
   showLoad('Loading dashboard…')
   DB.attByStudentSubject={}
-  await Promise.all(DB.subjects.map(async s=>{
+  if(!DB.classScheduleByBatch) DB.classScheduleByBatch={}
+
+  // Faculty: only load their assigned subjects (prevents hanging on all subjects)
+  const subsToLoad = CU.role==='faculty' ? getMySubjects() : DB.subjects
+
+  await Promise.all(subsToLoad.map(async s=>{
     await fetchClassSchedule(s.id,DB.curSession?.id)
     await fetchAttForSubject(s.id,DB.curSession?.id)
   }))
@@ -482,22 +514,22 @@ async function loadAttForm(){
 
   const sub=DB.subjects.find(s=>s.id===subId); if(!sub) return
 
-  // For practical subjects, show batch selector
+  // ── DEFINE pracBatch FIRST before any usage ──
   const isPrac = sub.subject_type==='practical'
+  const pracBatch = isPrac ? ($('mk-prac-batch-val')?.value||'A') : null
+
+  // Show/hide batch selector
   const pracBatchSel=$('mk-prac-batch')
-  if(pracBatchSel){
-    pracBatchSel.style.display=isPrac?'flex':'none'
-  }
+  if(pracBatchSel) pracBatchSel.style.display=isPrac?'flex':'none'
 
   showLoad('Loading…')
   await fetchLocksForSubject(subId)
   await fetchClassSchedule(subId,DB.curSession?.id)
-  const locked=isDateLocked(subId,date,isPrac?pracBatch:null)
+  const locked=isDateLocked(subId,date,pracBatch)
   const isFaculty=CU.role==='faculty'
   const readOnly=locked&&isFaculty
 
-  // Get students: for practical, filter by selected batch
-  const pracBatch=isPrac?($('mk-prac-batch-val')?.value||'A'):null
+  // Get students for this class
   const students=isPrac
     ?getStudentsForSubjectAndBatch(sub,pracBatch)
     :DB.students.filter(s=>s.batch===sub.batch)
@@ -581,7 +613,10 @@ window.toggleAtt=toggleAtt
 function markAll(status){
   const subId=$('mk-sub').value, date=$('mk-date').value
   if(!subId||!date){toast('Select subject and date.','i');return}
-  if(CU.role==='faculty'&&isDateLocked(subId,date)){toast('Locked.','i');return}
+  const _maSub=DB.subjects.find(s=>s.id===subId)
+  const _maIsPrac=_maSub?.subject_type==='practical'
+  const _maPracBatch=_maIsPrac?($('mk-prac-batch-val')?.value||'A'):null
+  if(CU.role==='faculty'&&isDateLocked(subId,date,_maPracBatch)){toast('Locked.','i');return}
   if(CU.role==='faculty'&&date!==todayStr()){toast('Only today\'s date allowed.','e');return}
   const sub=DB.subjects.find(s=>s.id===subId)
   const isPrac=sub?.subject_type==='practical'
@@ -1289,9 +1324,10 @@ window.loadHistoryReport=loadHistoryReport
 async function renderMySubjects(){
   const subs=getMySubjects()
   if($('mysub-p')) $('mysub-p').textContent=`${CU.name} — ${subs.length} subject(s) assigned`
-  if(!subs.length){$('my-sub-grid').innerHTML='<p style="color:var(--subtle)">No subjects assigned.</p>';return}
-  showLoad('Loading…')
+  if(!subs.length){$('my-sub-grid').innerHTML='<p style="color:var(--subtle)">No subjects assigned. Contact admin.</p>';return}
+  showLoad('Loading subjects…')
   DB.attByStudentSubject=DB.attByStudentSubject||{}
+  if(!DB.classScheduleByBatch) DB.classScheduleByBatch={}
   await Promise.all(subs.map(async s=>{
     await fetchClassSchedule(s.id,DB.curSession?.id)
     await fetchAttForSubject(s.id,DB.curSession?.id)
