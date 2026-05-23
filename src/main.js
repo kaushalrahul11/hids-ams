@@ -176,22 +176,55 @@ async function fetchAttForSubject(subjectId,sessionId){
 }
 
 async function fetchLocksForSubject(subjectId){
-  const{data}=await supabase.from('attendance_locks').select('date').eq('subject_id',subjectId)
-  ;(data||[]).forEach(r=>{ DB.attLocks[`${subjectId}_${r.date}`]=true })
+  const{data}=await supabase.from('attendance_locks').select('date,prac_batch').eq('subject_id',subjectId)
+  ;(data||[]).forEach(r=>{
+    // Key includes prac_batch so Batch A and Batch B lock independently
+    const key=`${subjectId}_${r.date}_${r.prac_batch||'null'}`
+    DB.attLocks[key]=true
+  })
 }
 
 async function fetchClassSchedule(subjectId,sessionId){
-  const{data}=await supabase.from('class_schedule').select('date,topic').eq('subject_id',subjectId).eq('session_id',sessionId).order('date',{ascending:false})
-  DB.classSchedule[subjectId]=(data||[]).map(r=>r.date)
-  // store topic map: classTopics[subjectId][date] = topic
+  const{data}=await supabase.from('class_schedule')
+    .select('date,topic,prac_batch')
+    .eq('subject_id',subjectId)
+    .eq('session_id',sessionId)
+    .order('date',{ascending:false})
+  // DB.classSchedule[subjectId] = all dates (theory) or all combined (practical)
+  // DB.classScheduleByBatch[subjectId][batch] = dates for that batch only
+  DB.classSchedule[subjectId]=[...new Set((data||[]).map(r=>r.date))]
+  if(!DB.classScheduleByBatch) DB.classScheduleByBatch={}
+  DB.classScheduleByBatch[subjectId]={A:[],B:[],null:[]}
+  ;(data||[]).forEach(r=>{
+    const b=r.prac_batch||null
+    if(b==='A') DB.classScheduleByBatch[subjectId]['A'].push(r.date)
+    else if(b==='B') DB.classScheduleByBatch[subjectId]['B'].push(r.date)
+    else DB.classScheduleByBatch[subjectId]['null'].push(r.date)
+  })
   if(!DB.classTopics) DB.classTopics={}
   DB.classTopics[subjectId]={}
-  ;(data||[]).forEach(r=>{ if(r.topic) DB.classTopics[subjectId][r.date]=r.topic })
+  ;(data||[]).forEach(r=>{ if(r.topic) DB.classTopics[subjectId][r.date+(r.prac_batch||'')]=r.topic })
 }
 
-// ── ATTENDANCE % — based on actual classes conducted, excluding holidays ──
+// ── ATTENDANCE % — based on actual classes conducted per batch, excluding holidays ──
 function getAttStat(studentId,subjectId){
-  const conducted=DB.classSchedule[subjectId]||[]
+  const student=DB.students.find(s=>s.id===studentId)
+  const sub=DB.subjects.find(s=>s.id===subjectId)
+  const isPrac=sub?.subject_type==='practical'
+
+  // For practical subjects, use only the dates for this student's prac batch
+  let conducted
+  if(isPrac && student?.prac_batch){
+    conducted=DB.classScheduleByBatch?.[subjectId]?.[student.prac_batch]||[]
+  } else if(isPrac){
+    // fallback: combine both batches (shouldn't normally happen)
+    conducted=DB.classSchedule[subjectId]||[]
+  } else {
+    // Theory: use dates with null prac_batch only
+    const nullDates=DB.classScheduleByBatch?.[subjectId]?.['null']||[]
+    conducted=nullDates.length>0?nullDates:(DB.classSchedule[subjectId]||[])
+  }
+
   const records=DB.attByStudentSubject?.[studentId]?.[subjectId]||[]
   const recMap={}; records.forEach(r=>recMap[r.date]=r.status)
   const holidaySet=new Set(DB.holidays.map(h=>h.date))
@@ -208,7 +241,10 @@ function getOverall(studentId){
   return t>0?Math.round(p/t*100):0
 }
 
-function isDateLocked(subjectId,date){ return !!DB.attLocks[`${subjectId}_${date}`] }
+function isDateLocked(subjectId,date,pracBatch){
+  const key=`${subjectId}_${date}_${pracBatch||'null'}`
+  return !!DB.attLocks[key]
+}
 function isHoliday(date){ return DB.holidays.some(h=>h.date===date) }
 
 // ── FACULTY HELPERS ──────────────────────────────────────────
@@ -456,7 +492,7 @@ async function loadAttForm(){
   showLoad('Loading…')
   await fetchLocksForSubject(subId)
   await fetchClassSchedule(subId,DB.curSession?.id)
-  const locked=isDateLocked(subId,date)
+  const locked=isDateLocked(subId,date,isPrac?pracBatch:null)
   const isFaculty=CU.role==='faculty'
   const readOnly=locked&&isFaculty
 
@@ -475,8 +511,9 @@ async function loadAttForm(){
   $('att-title').innerHTML=`${safe(sub.name)}${pracTag} — ${fmtDate(date)}${lockedBadge}`
   $('att-conducted').textContent=`Classes conducted: ${(DB.classSchedule[subId]||[]).length} | Students: ${students.length}`
 
-  // Load existing topic for this date
-  const existingTopic=(DB.classTopics?.[subId]?.[date])||''
+  // Load existing topic for this date+batch
+  const topicKey=date+(isPrac?pracBatch:'')
+  const existingTopic=(DB.classTopics?.[subId]?.[topicKey])||''
   const topicEl=$('att-topic')
   const topicWrap=$('att-topic-wrap')
   if(topicEl){
@@ -569,13 +606,13 @@ function updateCounts(students){
 async function saveAtt(){
   const subId=$('mk-sub').value, date=$('mk-date').value
   if(!subId||!date){toast('Nothing to save.','i');return}
-  if(CU.role==='faculty'&&isDateLocked(subId,date)){toast('Already locked.','e');return}
-  if(CU.role==='faculty'&&date!==todayStr()){toast('Faculty can only mark today.','e');return}
   const sub=DB.subjects.find(s=>s.id===subId)
   const isPrac=sub?.subject_type==='practical'
   const pracBatch=isPrac?($('mk-prac-batch-val')?.value||'A'):null
+  if(CU.role==='faculty'&&isDateLocked(subId,date,pracBatch)){toast('Already locked.','e');return}
+  if(CU.role==='faculty'&&date!==todayStr()){toast('Faculty can only mark today.','e');return}
   const sts=isPrac?getStudentsForSubjectAndBatch(sub,pracBatch):DB.students.filter(s=>s.batch===sub.batch)
-  if(!sts.length){toast('No students.','i');return}
+  if(!sts.length){toast('No students in this group.','i');return}
   showLoad('Saving…')
   const rows=sts.map(s=>({
     student_id:s.id, subject_id:subId, session_id:DB.curSession?.id,
@@ -584,25 +621,47 @@ async function saveAtt(){
   const{error}=await supabase.from('attendance').upsert(rows,{onConflict:'student_id,subject_id,date'})
   if(error){hideLoad();toast('Save failed: '+error.message,'e');return}
 
-  // Save topic to class_schedule
+  // Save topic + class_schedule — separate entry per prac_batch for practical subjects
   const topicVal=($('att-topic')?.value||'').trim()
   await supabase.from('class_schedule').upsert(
-    {subject_id:subId,session_id:DB.curSession?.id,date,topic:topicVal||null},
-    {onConflict:'subject_id,date'}
+    {subject_id:subId,session_id:DB.curSession?.id,date,prac_batch:pracBatch,topic:topicVal||null},
+    {onConflict:'subject_id,date,prac_batch'}
   )
+  // Update in-memory schedule
   if(!DB.classSchedule[subId]) DB.classSchedule[subId]=[]
   if(!DB.classSchedule[subId].includes(date)) DB.classSchedule[subId].push(date)
+  if(!DB.classScheduleByBatch) DB.classScheduleByBatch={}
+  if(!DB.classScheduleByBatch[subId]) DB.classScheduleByBatch[subId]={A:[],B:[],'null':[]}
+  const batchKey=pracBatch||'null'
+  if(!DB.classScheduleByBatch[subId][batchKey]) DB.classScheduleByBatch[subId][batchKey]=[]
+  if(!DB.classScheduleByBatch[subId][batchKey].includes(date)) DB.classScheduleByBatch[subId][batchKey].push(date)
+  // Update topic in memory
   if(!DB.classTopics) DB.classTopics={}
   if(!DB.classTopics[subId]) DB.classTopics[subId]={}
-  if(topicVal) DB.classTopics[subId][date]=topicVal
+  const topicKey=date+(pracBatch||'')
+  if(topicVal) DB.classTopics[subId][topicKey]=topicVal
+
   if(CU.role==='faculty'){
-    await supabase.from('attendance_locks').upsert({subject_id:subId,session_id:DB.curSession?.id,date,locked_by:CU.id},{onConflict:'subject_id,date'})
-    await supabase.from('attendance').update({locked:true}).eq('subject_id',subId).eq('date',date)
-    DB.attLocks[`${subId}_${date}`]=true
-    hideLoad(); toast('Saved & locked. Admin can edit if needed.','s')
+    // Lock only this batch on this date
+    await supabase.from('attendance_locks').upsert(
+      {subject_id:subId,session_id:DB.curSession?.id,date,prac_batch:pracBatch,locked_by:CU.id},
+      {onConflict:'subject_id,date,prac_batch'}
+    )
+    // Mark attendance rows as locked
+    const studentIds=sts.map(s=>s.id)
+    await supabase.from('attendance').update({locked:true})
+      .eq('subject_id',subId).eq('date',date).in('student_id',studentIds)
+    DB.attLocks[`${subId}_${date}_${pracBatch||'null'}`]=true
+    hideLoad()
+    toast(isPrac
+      ?`Batch ${pracBatch} attendance saved & locked for ${fmtDate(date)}.`
+      :`Attendance saved & locked for ${fmtDate(date)}.`,'s')
     await loadAttForm()
   } else {
-    hideLoad(); toast('Attendance saved!','s')
+    hideLoad()
+    toast(isPrac
+      ?`Batch ${pracBatch} attendance saved for ${fmtDate(date)}.`
+      :`Attendance saved!`,'s')
   }
 }
 window.saveAtt=saveAtt
@@ -610,21 +669,35 @@ window.saveAtt=saveAtt
 async function adminUnlock(){
   const subId=$('mk-sub').value, date=$('mk-date').value
   if(!subId||!date||CU.role!=='admin') return
+  const sub=DB.subjects.find(s=>s.id===subId)
+  const isPrac=sub?.subject_type==='practical'
+  const pracBatch=isPrac?($('mk-prac-batch-val')?.value||'A'):null
+  const batchLabel=isPrac?` (Batch ${pracBatch})`:'';
   openModal(`
     <h3 style="color:var(--danger)"><i class="ti ti-lock-open" style="font-size:15px;vertical-align:-2px;margin-right:6px"></i>Unlock Attendance</h3>
-    <p style="font-size:14px;color:var(--muted);margin-bottom:14px">Unlock attendance for <strong>${fmtDate(date)}</strong>? Faculty will be able to re-edit.</p>
+    <p style="font-size:14px;color:var(--muted);margin-bottom:14px">Unlock attendance for <strong>${fmtDate(date)}${batchLabel}</strong>? Faculty will be able to re-edit.</p>
     <div style="display:flex;justify-content:flex-end;gap:10px">
       <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-danger" onclick="confirmUnlock('${subId}','${date}')"><i class="ti ti-lock-open"></i>Unlock</button>
+      <button class="btn btn-danger" onclick="confirmUnlock('${subId}','${date}','${pracBatch||''}')"><i class="ti ti-lock-open"></i>Unlock</button>
     </div>`)
 }
 window.adminUnlock=adminUnlock
 
-async function confirmUnlock(subId,date){
+async function confirmUnlock(subId,date,pracBatch){
+  const pb=pracBatch||null
   showLoad('Unlocking…')
-  await supabase.from('attendance_locks').delete().eq('subject_id',subId).eq('date',date)
-  await supabase.from('attendance').update({locked:false}).eq('subject_id',subId).eq('date',date)
-  delete DB.attLocks[`${subId}_${date}`]
+  let delQ=supabase.from('attendance_locks').delete().eq('subject_id',subId).eq('date',date)
+  if(pb) delQ=delQ.eq('prac_batch',pb); else delQ=delQ.is('prac_batch',null)
+  await delQ
+  // Unlock attendance rows for relevant students
+  if(pb){
+    const sub=DB.subjects.find(s=>s.id===subId)
+    const sts=getStudentsForSubjectAndBatch(sub,pb)
+    await supabase.from('attendance').update({locked:false}).eq('subject_id',subId).eq('date',date).in('student_id',sts.map(s=>s.id))
+  } else {
+    await supabase.from('attendance').update({locked:false}).eq('subject_id',subId).eq('date',date)
+  }
+  delete DB.attLocks[`${subId}_${date}_${pb||'null'}`]
   hideLoad(); closeModal(); toast('Unlocked. You can now edit.','s'); await loadAttForm()
 }
 window.confirmUnlock=confirmUnlock
@@ -1228,8 +1301,11 @@ async function renderMySubjects(){
     const sts=DB.students.filter(s=>s.batch===sub.batch)
     let tp=0; sts.forEach(s=>{tp+=getAttStat(s.id,sub.id).pct})
     const av=sts.length?Math.round(tp/sts.length):0
-    const conducted=(DB.classSchedule[sub.id]||[]).length
-    const low=sts.filter(s=>{const a=getAttStat(s.id,sub.id);return a.pct<70&&a.t>0}).length
+    const isPrac=sub.subject_type==='practical'
+    const conductedA=(DB.classScheduleByBatch?.[sub.id]?.['A']||[]).length
+    const conductedB=(DB.classScheduleByBatch?.[sub.id]?.['B']||[]).length
+    const conducted=isPrac?null:(DB.classSchedule[sub.id]||[]).length
+    const conductedLabel=isPrac?`A:${conductedA} B:${conductedB} classes`:`${conducted} classes`
     const typeTag=sub.subject_type==='practical'
       ?'<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:4px;margin-left:5px;font-weight:700">Practical</span>'
       :'<span style="background:#eff6ff;color:#1d4ed8;font-size:10px;padding:1px 6px;border-radius:4px;margin-left:5px;font-weight:700">Theory</span>'
@@ -1243,7 +1319,7 @@ async function renderMySubjects(){
       </div>
       <div class="pb" style="margin-bottom:8px"><div class="pf" style="width:${av}%;background:${pctColor(av)}"></div></div>
       <div style="display:flex;justify-content:space-between;margin-bottom:11px">
-        <span style="font-size:11px;color:var(--muted)">${sts.length} students · ${conducted} classes</span>
+        <span style="font-size:11px;color:var(--muted)">${sts.length} students · ${conductedLabel}</span>
         ${low>0?`<span style="font-size:11px;color:var(--danger);font-weight:700">${low} below 70%</span>`:'<span style="font-size:11px;color:var(--success)">All ≥ 70%</span>'}
       </div>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
@@ -1280,26 +1356,55 @@ window.goMarkPrac=goMarkPrac
 async function showSubjReport(subId){
   const sub=DB.subjects.find(s=>s.id===subId)
   const sts=DB.students.filter(s=>s.batch===sub.batch)
+  const isPrac=sub.subject_type==='practical'
   showLoad('Loading…')
+  if(!DB.classScheduleByBatch) DB.classScheduleByBatch={}
   await fetchClassSchedule(subId,DB.curSession?.id)
   await fetchAttForSubject(subId,DB.curSession?.id)
   hideLoad()
-  const conducted=(DB.classSchedule[subId]||[]).length
+  const conductedA=(DB.classScheduleByBatch[subId]?.['A']||[]).length
+  const conductedB=(DB.classScheduleByBatch[subId]?.['B']||[]).length
+  const conductedAll=(DB.classSchedule[subId]||[]).length
+
+  const conductedLabel=isPrac
+    ?`Batch A: ${conductedA} classes | Batch B: ${conductedB} classes`
+    :`${conductedAll} classes conducted`
+
   openModal(`
     <div style="display:flex;justify-content:space-between;margin-bottom:14px">
-      <div><h3 style="font-size:15px;margin:0">${safe(sub.name)}</h3>
-        <p style="color:var(--muted);font-size:12px;margin:2px 0 0">${safe(sub.code)} · ${sub.batch} · ${conducted} classes · ${sub.subject_type==='practical'?'Practical':'Theory'}</p></div>
+      <div>
+        <h3 style="font-size:15px;margin:0">${safe(sub.name)}</h3>
+        <p style="color:var(--muted);font-size:12px;margin:2px 0 0">${safe(sub.code)} · ${sub.batch} · ${sub.subject_type==='practical'?'Practical':'Theory'} · ${conductedLabel}</p>
+      </div>
       <button class="btn btn-sm" onclick="closeModal()"><i class="ti ti-x"></i></button>
     </div>
+    ${isPrac?`
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:12px;font-weight:700;color:#065f46;margin-bottom:4px">Batch A (Roll 1–50)</div>
+        <div style="font-size:11px;color:#065f46">${conductedA} classes conducted</div>
+      </div>
+      <div style="flex:1;background:#fce7f3;border:1px solid #f9a8d4;border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:12px;font-weight:700;color:#9d174d;margin-bottom:4px">Batch B (Roll 51–100)</div>
+        <div style="font-size:11px;color:#9d174d">${conductedB} classes conducted</div>
+      </div>
+    </div>`:''}
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Roll</th><th>Name</th>${sub.subject_type==='practical'?'<th>Prac Batch</th>':''}<th>Present</th><th>Absent</th><th>Classes</th><th>%</th></tr></thead>
+        <thead><tr><th>Roll</th><th>Name</th>${isPrac?'<th>Prac Batch</th>':''}<th>Present</th><th>Absent</th><th>Classes</th><th>%</th><th>Status</th></tr></thead>
         <tbody>${sts.map(s=>{
           const a=getAttStat(s.id,subId)
-          return `<tr><td><span class="roll-b">${safe(s.roll)}</span></td><td style="font-weight:600">${safe(s.name)}</td>
-            ${sub.subject_type==='practical'?`<td><span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;font-weight:700">Batch ${s.prac_batch||'A'}</span></td>`:''}
-            <td style="color:var(--success);font-weight:700">${a.p}</td><td style="color:var(--danger);font-weight:700">${a.a}</td>
-            <td>${a.t}</td><td style="font-weight:800;color:${pctColor(a.pct)}">${a.t>0?a.pct+'%':'—'}</td></tr>`
+          const pb=s.prac_batch||'A'
+          return `<tr>
+            <td><span class="roll-b">${safe(s.roll)}</span></td>
+            <td style="font-weight:600">${safe(s.name)}</td>
+            ${isPrac?`<td><span class="tag-batch-${pb.toLowerCase()}">Batch ${pb}</span></td>`:''}
+            <td style="color:var(--success);font-weight:700">${a.p}</td>
+            <td style="color:var(--danger);font-weight:700">${a.a}</td>
+            <td>${a.t}</td>
+            <td style="font-weight:800;color:${pctColor(a.pct)}">${a.t>0?a.pct+'%':'—'}</td>
+            <td><span class="badge ${pctBadge(a.pct)}">${a.t>0?(a.pct>=75?'Good':'Low'):'N/A'}</span></td>
+          </tr>`
         }).join('')}</tbody>
       </table>
     </div>`)
